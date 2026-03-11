@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Fluid Energy Lines</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #000;
+        }
+
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+
+<body>
+    <script>
+        let particles = [];
+        let dustParticles = [];
+        const numParticles = 600; // Reduced number slightly to make stars visible
+        const noiseScale = 0.005;
+
+        function setup() {
+            createCanvas(windowWidth, windowHeight);
+            background(0);
+            for (let i = 0; i < numParticles; i++) {
+                particles.push(new Particle());
+            }
+        }
+
+        function draw() {
+            // Create a trailing effect by drawing a semi-transparent background
+            background(0, 15);
+
+            // Update and display dust particles
+            for (let i = dustParticles.length - 1; i >= 0; i--) {
+                let d = dustParticles[i];
+                d.update();
+                d.display();
+                if (d.isDead()) {
+                    dustParticles.splice(i, 1);
+                }
+            }
+
+            // Update and display main stars
+            for (let i = particles.length - 1; i >= 0; i--) {
+                let p = particles[i];
+                p.update();
+                p.display();
+
+                // If the star was shattered and died, replace it so we maintain count
+                if (p.isDead) {
+                    particles.splice(i, 1);
+                    particles.push(new Particle());
+                }
+            }
+        }
+
+        function windowResized() {
+            resizeCanvas(windowWidth, windowHeight);
+            background(0);
+        }
+
+        function mousePressed() {
+            for (let i = 0; i < particles.length; i++) {
+                let p = particles[i];
+                let mousePos = createVector(mouseX, mouseY);
+                let dir = p5.Vector.sub(p.pos, mousePos);
+                let distance = dir.mag();
+
+                // If particle is within explosion radius
+                if (distance < 250 && !p.shattered) {
+                    // Shatter the star
+                    p.shatter();
+                }
+            }
+        }
+
+        // Custom function to draw a star
+        function drawStar(x, y, radius1, radius2, npoints) {
+            let angle = TWO_PI / npoints;
+            let halfAngle = angle / 2.0;
+            beginShape();
+            for (let a = 0; a < TWO_PI; a += angle) {
+                let sx = x + cos(a) * radius2;
+                let sy = y + sin(a) * radius2;
+                vertex(sx, sy);
+                sx = x + cos(a + halfAngle) * radius1;
+                sy = y + sin(a + halfAngle) * radius1;
+                vertex(sx, sy);
+            }
+            endShape(CLOSE);
+        }
+
+        class Dust {
+            constructor(x, y, color) {
+                this.pos = createVector(x, y);
+                this.vel = p5.Vector.random2D().mult(random(2, 8));
+                this.acc = createVector(0, 0.1); // Gravity
+                this.baseColor = color;
+                this.life = 255;
+                this.size = random(1, 3);
+            }
+
+            update() {
+                this.vel.add(this.acc);
+                this.pos.add(this.vel);
+                this.life -= random(3, 8); // Fade out
+            }
+
+            display() {
+                noStroke();
+                fill(red(this.baseColor), green(this.baseColor), blue(this.baseColor), this.life);
+                ellipse(this.pos.x, this.pos.y, this.size, this.size);
+            }
+
+            isDead() {
+                return this.life <= 0;
+            }
+        }
+
+        class Particle {
+            constructor() {
+                this.pos = createVector(random(width), random(height));
+                this.vel = createVector(0, 0);
+
+                // Fireworks color palette
+                const fireworkColors = [
+                    color(255, 50, 50),     // Red
+                    color(255, 150, 50),    // Orange
+                    color(255, 255, 50),    // Yellow
+                    color(50, 255, 50),     // Green
+                    color(50, 150, 255),    // Blue
+                    color(200, 50, 255),    // Purple
+                    color(255, 255, 255)    // White
+                ];
+                this.baseColor = random(fireworkColors);
+
+                this.maxSpeed = random(1.5, 3.5);
+                this.size = random(3, 8); // Slightly larger to see the star shape
+                this.rotation = random(TWO_PI);
+                this.rotationSpeed = random(-0.05, 0.05);
+                this.shattered = false;
+                this.isDead = false;
+            }
+
+            shatter() {
+                if (this.shattered) return;
+                this.shattered = true;
+                this.isDead = true;
+
+                // Create dust particles
+                let amount = floor(random(5, 12));
+                for (let i = 0; i < amount; i++) {
+                    dustParticles.push(new Dust(this.pos.x, this.pos.y, this.baseColor));
+                }
+            }
+
+            update() {
+                if (this.shattered) return; // Stop doing normal behavior if smashed
+
+                // Determine direction using 3D Perlin noise (x, y, time)
+                let n = noise(this.pos.x * noiseScale, this.pos.y * noiseScale, frameCount * 0.005);
+                let angle = map(n, 0, 1, 0, TWO_PI * 4);
+                let force = p5.Vector.fromAngle(angle);
+
+                // Add interactivity: particles react to the mouse
+                if (winMouseX !== 0 || winMouseY !== 0) {
+                    let mousePos = createVector(mouseX, mouseY);
+                    let h = p5.Vector.sub(mousePos, this.pos);
+                    let distance = h.mag();
+
+                    if (distance < 150) {
+                        h.normalize();
+                        // Push away from mouse
+                        h.mult(-1.5 * map(distance, 0, 150, 1, 0));
+                        force.add(h);
+                    }
+                }
+
+                // Apply force to velocity
+                this.vel.add(force);
+                this.vel.limit(this.maxSpeed);
+                this.pos.add(this.vel);
+                this.rotation += this.rotationSpeed;
+
+                // Keep particles on screen (wrap around)
+                if (this.pos.x < 0) this.pos.x = width;
+                if (this.pos.x > width) this.pos.x = 0;
+                if (this.pos.y < 0) this.pos.y = height;
+                if (this.pos.y > height) this.pos.y = 0;
+            }
+
+            display() {
+                if (this.shattered) return; // Don't draw the star if it's shattered
+
+                push();
+                translate(this.pos.x, this.pos.y);
+                rotate(this.rotation);
+
+                noStroke();
+                // Add a glowing effect to the star
+                fill(red(this.baseColor), green(this.baseColor), blue(this.baseColor), 150);
+                drawStar(0, 0, this.size * 0.4, this.size * 1.5, 5);
+                fill(255, 255, 255, 200);
+                drawStar(0, 0, this.size * 0.2, this.size * 0.6, 5);
+                pop();
+            }
+        }
+    </script>
+</body>
+
+</html>
